@@ -20,6 +20,8 @@ public class GlitchPixelated : MonoBehaviour
     public int dividePixles = 10;
     public float mouseDragRadius = 10f;
     private Camera cameraMain;
+    private RaycastHit2D rayCastHit;
+    public float fadeSpeed = 0.15f; 
 
     void SetValueFromHost() //waiting for parameter..
     {
@@ -50,27 +52,35 @@ public class GlitchPixelated : MonoBehaviour
 
         pixelatedTexture = new Texture2D(copyTexture.width / dividePixles, copyTexture.height / dividePixles);
 
-        for (int y =0; y <= pixelatedTexture.height; y++)
+        for (int y = 0; y <= pixelatedTexture.height; y++)
         {
-            for (int x =0; x <= pixelatedTexture.width; x++)
+            for (int x = 0; x <= pixelatedTexture.width; x++)
             {
-                //color glitchColor > blue (random blue value)
-                Color pixelColor = originalTexture.GetPixel(x * dividePixles, y * dividePixles);
+                //random blue value
+                float randomBlue = UnityEngine.Random.Range(0.4f, 1f);
+                float randomGreen = UnityEngine.Random.Range(0f, 0.3f);
+                float randomRed = UnityEngine.Random.Range(0f, 0.2f);
+
+                Color pixelColor = new Color(randomRed, randomGreen, randomBlue);
 
                 for (int dy = 0; dy < dividePixles; dy++)
                 {
                     for (int dx = 0; dx < dividePixles; dx++)
                     {
-                        if (x * dividePixles + dx < copyTexture.width && y * dividePixles + dy < copyTexture.height)
+                        int px = x * dividePixles + dx;
+                        int py = y * dividePixles + dy;
+
+                        if (px < copyTexture.width && py < copyTexture.height)
                         {
-                            copyTexture.SetPixel(x * dividePixles + dx, y * dividePixles + dy, pixelColor);
+                            copyTexture.SetPixel(px, py, pixelColor);
                         }
                     }
                 }
             }
         }
+
         copyTexture.Apply();
-        spriteRenderer.sprite = Sprite.Create(copyTexture,new Rect(0, 0, originalTexture.width, originalTexture.height), new Vector2(0.5f, 0.5f));
+        spriteRenderer.sprite = Sprite.Create(copyTexture,new Rect(0, 0, originalTexture.width, originalTexture.height),new Vector2(0.5f, 0.5f));
     }
 
     void Update()
@@ -83,32 +93,43 @@ public class GlitchPixelated : MonoBehaviour
         {
             ReturenOriginalTexture();
         }
+
+        rayCastHit = Physics2D.Raycast(cameraMain.ScreenToWorldPoint(Input.mousePosition), Vector2.zero);
+        if (rayCastHit.collider != null)
+        {
+            Debug.Log("Raycast hit: " + rayCastHit.collider.name);
+            Debug.Log("mouse position: " + rayCastHit.point.x + ", " + rayCastHit.point.y);
+        }
     }
 
     void OnMouseDrag()
     {
-        Debug.Log("Mouse is being dragged");
+        if (rayCastHit.collider == null) return;
 
-        Vector3 mouseWorld = cameraMain.ScreenToWorldPoint(Input.mousePosition);
-        Vector3 mouseLocal = transform.InverseTransformPoint(mouseWorld);
+        // Convert world hit point to local position relative to the sprite
+        Vector3 localPos = transform.InverseTransformPoint(rayCastHit.point);
 
-        float textureX = (mouseLocal.x + 0.5f) * copyTexture.width;
-        float textureY = (mouseLocal.y + 0.5f) * copyTexture.height;
+        // Get sprite data
+        Sprite sprite = spriteRenderer.sprite;
+        Rect rect = sprite.rect;
+        float ppu = sprite.pixelsPerUnit;
 
-        int texX = Mathf.Clamp(Mathf.RoundToInt(textureX), 0, copyTexture.width - 1);
-        int texY = Mathf.Clamp(Mathf.RoundToInt(textureY), 0, copyTexture.height - 1);
+        // Convert from local space (Unity units) to texture pixel space
+        float pixelX = (localPos.x * ppu) + sprite.pivot.x + rect.x;
+        float pixelY = (localPos.y * ppu) + sprite.pivot.y + rect.y;
 
+        // Clamp to valid texture bounds
+        int texX = Mathf.Clamp(Mathf.RoundToInt(pixelX), 0, copyTexture.width - 1);
+        int texY = Mathf.Clamp(Mathf.RoundToInt(pixelY), 0, copyTexture.height - 1);
+
+        // Restore original pixels under the mouse
         ReturnOriginalPixels(texX, texY);
 
-        Debug.Log($"Mouse Position in Texture: ({texX}, {texY})");
-        Debug.Log($"Mouse Position in World: {mouseWorld}");
+        Debug.Log($"Mouse (world): {rayCastHit.point} → (texture): ({texX}, {texY})");
     }
 
     void ReturnOriginalPixels(int posX, int posY)
     {
-        // dividePixles = Mathf.Clamp(dividePixles,1,dividePixles);
-        // dividePixles-=(int)Time.deltaTime;
-
         for (int y = -Mathf.RoundToInt(mouseDragRadius); y <= mouseDragRadius; y++)
         {
             for (int x = -Mathf.RoundToInt(mouseDragRadius); x <= mouseDragRadius; x++)
@@ -117,10 +138,15 @@ public class GlitchPixelated : MonoBehaviour
                 int py = posY + y;
 
                 if (px < 0 || py < 0 || px >= originalTexture.width || py >= originalTexture.height)
-                { continue; }
+                    continue;
 
-                Color originalPixelColor = originalTexture.GetPixel(px, py);
-                copyTexture.SetPixel(px, py, originalPixelColor);
+                Color currentColor = copyTexture.GetPixel(px, py);
+                Color originalColor = originalTexture.GetPixel(px, py);
+
+                // blend them smoothly
+                Color fadedColor = Color.Lerp(currentColor, originalColor, fadeSpeed);
+
+                copyTexture.SetPixel(px, py, fadedColor);
             }
         }
         copyTexture.Apply();
